@@ -1,0 +1,218 @@
+---
+title: "Graphs- Vaccine Data- SJC- South Bend"
+output:
+  html_document: default
+  html_notebook: default
+---
+
+```{r}
+library(plyr)
+library(ggplot2)
+library(tidyverse)
+library(readr)
+library(dplyr)
+library(readxl)
+library(writexl)
+library(uuid)
+library(data.table)   
+library(stringr)
+library(lubridate)
+```
+
+
+```{r}
+
+data <- read_csv("~/Downloads/ST._JOSEPH_857_4_23_2021.csv")
+df <- data.frame(data)  %>% mutate(todays_date=Sys.Date()) 
+```
+
+```{r}
+#CREATE TODAYS DATE
+d.in <- data.frame(data)  %>% mutate(todays_date=Sys.Date()) 
+```
+
+```{r}
+#CHANGE DOB TO AGE 
+age<-d.in %>%
+    mutate(
+      pat_birth_date= mdy(pat_birth_date),
+      todays_date = ymd(todays_date),
+        age = year(todays_date) - year(pat_birth_date)) 
+```
+
+```{r}
+#Create new Unique_ID 
+ID<-mutate(age , Unique_ID = paste(age, last_irms_pat_id_to_update,pat_county_fips,dose_number,sep = ""))
+```
+
+```{r}
+#Remove Unused Columns
+data1<-select (ID,-c( 'deletion_date', 'insert_stamp','last_irms_pat_id_to_update', 'last_irms_pat_id_to_update', 'expiration_date','pat_county_fips','pat_middle_name','facility_county_fips','last_irms_sys_id_to_update' )) 
+view(data1)
+```
+
+```{r}
+#check for NAs in each category
+data %>%
+  select(everything()) %>%  # replace to your needs
+  summarise_all(funs(sum(is.na(.))))
+```
+
+
+```{r}
+#Assign race according to CHIRP designation- Make field 5 and 7 Other Race
+data1$pat_race <- as.character(data1$pat_race)
+data1$pat_race[data1$pat_race == 1] <-"White"
+data1$pat_race[data1$pat_race == 2] <-"Black or African American"
+data1$pat_race[data1$pat_race == 3] <-"Declined"
+data1$pat_race[data1$pat_race == 4] <-"Asian"
+data1$pat_race[data1$pat_race == 5] <-"Other Race" #redefine as Other For Calucalating -American Indian or Alaska Native
+data1$pat_race[data1$pat_race == 6] <-"Other Race"
+data1$pat_race[data1$pat_race == 7] <-"Other Race" #Redefine as other for-Native Hawaiian or Other Pacific Islander calculating
+data1$pat_race[data1$pat_race == 8] <-"Multiracial"
+data1$pat_race[data1$pat_race == 9] <-"Not Reported"
+data1$pat_ethnicity_code[data1$pat_ethnicity_code == 1] <-"Hispanic or Latino"
+data1$pat_ethnicity_code[data1$pat_ethnicity_code == 2] <-"Not Hispanic or Latino"
+data1$pat_ethnicity_code[data1$pat_ethnicity_code == 3] <-"Hispanic or Latino"
+```
+
+
+
+```{r}
+#create total_count column counts total vaccination at site by date
+data2<- data1 %>%group_by(irms_name,vacc_date)  %>% mutate(count = n())
+data2<- data2 %>% rename(total_count = count) %>% mutate(date = mdy(vacc_date)) 
+
+#sum vaccination total by site, arrange by top vaccination site
+data2 %>% group_by(irms_name) %>% distinct (irms_name, total_count) %>%
+  mutate(sum(total_count))  %>% distinct(sum(total_count),irms_name) %>% arrange(desc(`sum(total_count)`))
+```
+
+```{r}
+#rename vacc_description to vacc name
+data2$vacc_name[data2$cdc_vacc_code == "208"] <-"Pfizer"
+data2$vacc_name[data2$cdc_vacc_code == "207"] <-"Moderna"
+data2$vacc_name[data2$cdc_vacc_code == "212"] <-"Johnson and Johnson"
+```
+
+```{r}
+#graph all vaccinations overtime- both county and non county residents
+ggplot(data2, aes(x=date,fill=vacc_name)) + #replace fill vacc_name>> pat_race
+  geom_histogram(binwidth=1, alpha=.6, position="stack") + 
+  scale_fill_discrete(name = "Vacination Type")  + 
+  xlab('Vaccination Date ') +
+  labs(title = "All Vaccinations Over Time") 
+```
+
+```{r}
+#Top 5 Institutions 
+top5<- data2 %>%  filter(  irms_name=="BEACON MEDICAL GROUP"| irms_name=="HEALTHLINC COMMUNITY HEALTH CENTER" | irms_name=="MEIJER PHARMACY" |  irms_name=="ST JOSEPH COUNTY HEALTH DEPARTMENT"| irms_name=="TRINITY HEALTH SJRMCPL/SJRMCSB") %>%group_by(irms_name,vacc_date)  %>% mutate(count = n())
+```
+
+
+```{r}
+#Line Graph Total Count Top 5
+ggplot(top5, aes(date, count)) +
+  geom_line(aes(color = irms_name), size = 1)  + 
+  labs(title =" Total Vaccinations - By Top 5 Institutions") +
+  scale_color_discrete(name = "Institution Name")
+```
+
+
+SJC Residents Only- and Fully Vaccinated
+
+```{r}
+#filter series complete and SJC residents
+SJCdata <- data2 %>% filter (pat_county=="ST. JOSEPH" & series_complete=="Y")
+
+```
+
+```{r}
+#check top 5 SJC
+SJCdata %>% group_by(irms_name) %>% distinct (irms_name, total_count) %>%
+  mutate(sum(total_count))  %>% distinct(sum(total_count),irms_name) %>% arrange(desc(`sum(total_count)`))
+```
+
+```{r}
+#Top 5 Institutions 
+SJCtop5<- SJCdata %>%  filter(  irms_name=="BEACON MEDICAL GROUP"| irms_name=="HEALTHLINC COMMUNITY HEALTH CENTER" | irms_name=="MEIJER PHARMACY" |  irms_name=="ST JOSEPH COUNTY HEALTH DEPARTMENT"| irms_name=="TRINITY HEALTH SJRMCPL/SJRMCSB") %>%group_by(irms_name,vacc_date)  %>% mutate(count = n())
+```
+
+```{r}
+#graph fully vaccinated overtime- both SJC residents
+ggplot(SJCdata, aes(x=date,fill=vacc_name)) + #replace fill vacc_name>> pat_race
+  geom_histogram(binwidth=1, alpha=.6, position="stack") + 
+  scale_fill_discrete(name = "Vacination Type")  + 
+  xlab('Vaccination Date ') +
+  labs(title = "Fully Vaccinated- SJC Residents") 
+```
+
+```{r}
+#Line Graph Total Count Top 5- SJC fully Vaccinated
+ggplot(SJCtop5, aes(date, count)) +
+  geom_line(aes(color = irms_name), size = 1)  + 
+  labs(title =" Fully Vaccinated-SJC Residents - By Top 5 Institutions") +
+  scale_color_discrete(name = "Institution Name")
+```
+Priority Population
+```{r}
+#filter series complete and black SJC
+SJCblack <- data2 %>% filter (pat_county=="ST. JOSEPH" & series_complete=="Y" & pat_race=="Black or African American")
+
+```
+
+```{r}
+regroup<- SJCblack  %>% group_by(irms_name,vacc_date)  %>% mutate(count = n())
+
+#check top institutions
+regroup %>% group_by(irms_name) %>% distinct (irms_name,count) %>%
+  mutate(sum(count))  %>% distinct(sum(count),irms_name) %>%
+  arrange(desc(`sum(count)`))
+
+```
+
+
+
+```{r}
+#Top 5 Institutions - Black SJC fully vaccinated
+SJCtop5Black<- regroup %>%  filter( irms_name=="MASS IMMUNIZATIONS"| irms_name=="HEALTHLINC COMMUNITY HEALTH CENTER" | irms_name=="MEIJER PHARMACY" |  irms_name=="ST JOSEPH COUNTY HEALTH DEPARTMENT"| irms_name=="TRINITY HEALTH SJRMCPL/SJRMCSB")
+```
+
+```{r}
+#Line Graph Total Count Top 5- SJC fully Vaccinated
+ggplot(SJCtop5Black, aes(date, count)) +
+  geom_line(aes(color = irms_name), size = 1)  + 
+  labs(title =" Fully Vaccinated- Black SJC Residents - By Top 5 Institutions") +
+  scale_color_discrete(name = "Institution Name")
+```
+
+```{r}
+#filter series complete and Latino SJC
+SJClatino <- data2 %>% filter (pat_county=="ST. JOSEPH" & series_complete=="Y" & pat_ethnicity_code=="Hispanic or Latino")
+
+```
+
+```{r}
+regroup<- SJClatino  %>% group_by(irms_name,vacc_date)  %>% mutate(count = n())
+
+#check top institutions
+regroup %>% group_by(irms_name) %>% distinct (irms_name,count) %>%
+  mutate(sum(count))  %>% distinct(sum(count),irms_name) %>%
+  arrange(desc(`sum(count)`))
+
+```
+
+
+
+```{r}
+#Top 5 Institutions - latino SJC fully vaccinated
+SJCtop5latino<- regroup %>%  filter( irms_name=="MASS IMMUNIZATIONS"| irms_name=="HEALTHLINC COMMUNITY HEALTH CENTER" | irms_name=="MEIJER PHARMACY" |  irms_name=="ST JOSEPH COUNTY HEALTH DEPARTMENT"| irms_name=="CVS PHARMACY")
+```
+
+```{r}
+#Line Graph Total Count Top 5- SJC fully Vaccinated
+ggplot(SJCtop5latino, aes(date, count)) +
+  geom_line(aes(color = irms_name), size = 1)  + 
+  labs(title =" Fully Vaccinated- Latino SJC Residents - By Top 5 Institutions") +
+  scale_color_discrete(name = "Institution Name")
+```
